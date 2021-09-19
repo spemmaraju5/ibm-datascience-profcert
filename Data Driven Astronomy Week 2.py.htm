@@ -1,0 +1,696 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# ## Introduction
+
+#  When investigating astronomical objects, like active galactic nuclei (AGN), astronomers compare data about those objects from different telescopes at different wavelengths.
+# 
+# This requires positional cross-matching to find the closest counterpart within a given radius on the sky.
+# 
+# In this activity you'll cross-match two catalogues: one from a radio survey, the AT20G Bright Source Sample (BSS) catalogue and one from an optical survey, the SuperCOSMOS all-sky galaxy catalogue.
+# 
+# The BSS catalogue lists the brightest sources from the AT20G radio survey while the SuperCOSMOS catalogue lists galaxies observed by visible light surveys. If we can find an optical match for our radio source, we are one step closer to working out what kind of object it is, e.g. a galaxy in the local Universe or a distant quasar.
+# 
+# We've chosen one small catalogue (BSS has only 320 objects) and one large one (SuperCOSMOS has about 240 million) to demonstrate the issues you can encounter when implementing cross-matching algorithms. 
+
+# ## Equatorial Coordinates
+
+# The positions of stars, galaxies and other astronomical objects are usually recorded in either equatorial or Galactic coordinates.
+# 
+# Equatorial coordinates are fixed relative to the celestial sphere, so the positions are independent of when or where the observations took place. They are defined relative to the celestial equator (which is in the same plane as the Earth's equator) and the ecliptic (the path the sun traces throughout the year).
+# 
+# A point on the celestial sphere is given by two coordinates:
+# 
+# 1. Right ascension: the angle from the vernal equinox to the point, going east along the celestial equator;
+# 2. Declination: the angle from the celestial equator to the point, going north (negative values indicate going south).
+# 
+# The vernal equinox is the intersection of the celestial equator and the ecliptic where the ecliptic rises above the celestial equator going further east. 
+
+# ## Coordinates: Right Ascension
+
+# Right ascension is often given in hours-minutes-seconds (HMS) notation, because it was convenient to calculate when a star would appear over the horizon. A full circle in HMS notation is 24 hours, which means 1 hour in HMS notation is equal to 15 degrees.
+# 
+# Each hour is split into 60 minutes and each minute into 60 seconds.
+
+# ## Coordinates: Declination
+
+# Declination, on the other hand, is traditionally recorded in degrees-minutes-seconds (DMS) notation. A full circle is 360 degrees, each degree has 60 arcminutes and each arcminute has 60 arcseconds. 
+
+# ### Convert to Decimal Degrees Exercise
+
+# Write two functions, one that converts right ascension from HMS to decimal degrees, called hms2dec, and another that converts declination from DMS to decimal degrees, called dms2dec.
+# 
+# Right ascension is always an angle from 0 to 24 hours and declination is always an angle from -90° to +90°. 
+
+# In[1]:
+
+
+def hms2dec(hours, mins, seconds):
+    retval = 15*(hours + mins/60 + seconds/3600)
+    return retval
+
+def dms2dec(degrees, mins, seconds):
+    if degrees < 0:
+        retval = -1*(abs(degrees) + mins/60 + seconds/3600)
+    else:
+        retval = (degrees + mins/60 + seconds/3600)
+    return retval
+
+
+# ## Angular Distance
+
+# To crossmatch two catalogues we need to compare the angular distance between objects on the celestial sphere.
+# 
+# People loosely call this a "distance", but technically its an angular distance: the projected angle between objects as seen from Earth.
+# 
+# If we have an object on the celestial sphere with right ascension and declination $(\alpha_{1},\delta_{1})$, then the angular distance to another object with coordinates $(\alpha_{2},\delta_{2})$ is: 
+# $$ d = 2\arcsin{\sqrt{\sin^{2}(\frac{|\delta_{1}-\delta_{2}|}{2})+\cos(\delta_{1})\cos(\delta_{2})\sin^{2}(\frac{|\alpha_{1}-\alpha_{2}|}{2}})}$$
+# Angular distances have the same units as angles (degrees). There are other equations for calculating the angular distance but this one, called the haversine formula, is good at avoiding floating point errors when the two points are close together. 
+
+# ### Heavenly Angles Exercise
+
+# Write a function called angular_dist that calculates the angular distance between any two points on the celestial sphere given their right ascension and declination.
+# 
+# Your function should take arguments in decimal degrees and return the distance in decimal degrees too. 
+
+# In[2]:
+
+
+import numpy as np
+import math # imported for the constant pi
+def angular_dist(ra1, dec1, ra2, dec2):
+    rad_convert = math.pi/180 # Required to convert input parameters to radians
+    a1, a2, d1, d2 = ra1*rad_convert, ra2*rad_convert, dec1*rad_convert, dec2*rad_convert
+    term1 = np.sin((np.abs(d1-d2)/2))**2
+    term2 = np.cos(d1)*np.cos(d2)*np.sin(np.abs(a1-a2)/2)**2
+    
+    ang_dist = 2*(np.arcsin(np.sqrt(term1+term2)))/(rad_convert) # Convert back to degrees
+    
+    
+    return ang_dist
+
+
+# ## Loading Catalogues
+
+# Before we can crossmatch our two catalogues we first have to import the raw data. Every astronomy catalogue tends to have its own unique format so we'll need to look at how to do this with each one individually.
+# 
+# We'll look at the AT20G bright source sample survey first. The raw data we'll be using is the file table2.dat from this page (http://cdsarc.u-strasbg.fr/viz-bin/Cat?J/MNRAS/384/775) in the VizieR archives, but we'll use the filename bss.dat from now on.
+# 
+# Every catalogue in VizieR has a detailed README file that gives you the exact format of each table in the catalogue.
+
+# ### AT20G BSS Catalogue
+
+# The full catalogue of bright radio sources contains 320 objects.The catalogue is organised in fixed-width columns, with the format of the columns being:
+# 
+#     1: Object catalogue ID number (sometimes with an asterisk)
+#     2-4: Right ascension in HMS notation
+#     5-7: Declination in DMS notation
+#     8-: Other information, including spectral intensities
+
+# ### SuperCOSMOS All-Sky Catalogue
+
+#  The SuperCOSMOS all-sky catalogue is a catalogue of galaxies generated from several visible light surveys.
+# 
+# The original data is available on this page in a package called SCOS_XSC_mCl1_B21.5_R20_noStepWedges.csv.gz. Because this catalogue is so large, we've cut it down for these activities. The cut down version of the file will be named super.csv. 
+# 
+# The catalogue uses a comma-separated value (CSV) format. Aside from the first row, which contains column labels, the format is:
+# 
+#     1: Right ascension in decimal degrees
+#     2: Declination in decimal degrees
+#     3: Other data, including magnitude and apparent shape
+# 
+# 
+# 
+
+# ### Playing with Space Cats Exercise
+
+#  Write import_bss and import_super functions that import the AT20G BSS and SuperCOSMOS catalogues from the files bss.dat and super.csv as described in the previous slides.
+# 
+# Each function should return a list of tuples containing the object's ID (an integer) and the coordinates in degrees. The object ID should be the row of the object in the catalogue, starting at 1. 
+
+# In[3]:
+
+
+import numpy as np
+def hms2dec(hours, mins, seconds):
+    retval = 15*(hours + mins/60 + seconds/3600)
+    return retval
+
+def dms2dec(degrees, mins, seconds):
+    if degrees < 0:
+        retval = -1*(abs(degrees) + mins/60 + seconds/3600)
+    else:
+        retval = (degrees + mins/60 + seconds/3600)
+    return retval
+
+# Write your import_bss function here.
+def import_bss():
+    retlst = []
+    cat = np.loadtxt('bss.dat', usecols = range(1,7))
+
+    row_num = 1
+    for row in range(cat.shape[0]):
+        ddeg_hms = hms2dec(cat[row][0], cat[row][1], cat[row][2])
+        ddeg_dms = dms2dec(cat[row][3], cat[row][4], cat[row][5])
+        retlst.append((row_num, ddeg_hms, ddeg_dms))
+        row_num += 1
+    return retlst
+
+
+def import_super():
+    retlst = []
+    cat = np.loadtxt('super.csv', delimiter = ',', usecols = range(2), 
+                     skiprows = 1)
+    row_num = 1
+    for row in range(cat.shape[0]):
+        retlst.append((row_num, cat[row][0], cat[row][1]))
+        row_num += 1
+    return retlst
+
+
+# ### Look Around You Exercise
+#  Write a find_closest function that takes a catalogue and the position of a target source (a right ascension and declination) and finds the closest match for the target source in the catalogue.
+# 
+# Your function should return the ID of the closest object and the distance to that object.
+# 
+# The right ascension and declination are in degrees. The catalogue list has been loaded by import_bss from the previous question. The full 320 object BSS catalogue is contained in bss.dat for you to test your code on. 
+# 
+
+# In[4]:
+
+
+import numpy as np
+
+def hms2dec(hr, m, s):
+  dec = hr + m/60 + s/3600
+  return dec*15
+
+def dms2dec(d, m, s):
+  sign = d/abs(d)
+  dec = abs(d) + m/60 + s/3600
+  return sign*dec
+
+def import_bss():
+  res = []
+  data = np.loadtxt('bss.dat', usecols=range(1, 7))
+  for i, row in enumerate(data, 1):
+    res.append((i, hms2dec(row[0], row[1], row[2]), dms2dec(row[3], row[4], row[5])))
+  return res
+
+def import_super():
+  data = np.loadtxt('super.csv', delimiter=',', skiprows=1, usecols=[0, 1])
+  res = []
+  for i, row in enumerate(data, 1):
+    res.append((i, row[0], row[1]))
+  return res
+
+def angular_dist(ra1, dec1, ra2, dec2):
+  # Convert to radians
+  r1 = np.radians(ra1)
+  d1 = np.radians(dec1)
+  r2 = np.radians(ra2)
+  d2 = np.radians(dec2)
+
+  a = np.sin(np.abs(d1 - d2)/2)**2
+  b = np.cos(d1)*np.cos(d2)*np.sin(np.abs(r1 - r2)/2)**2
+
+  angle = 2*np.arcsin(np.sqrt(a + b))
+    
+  # Convert back to degrees
+  return np.degrees(angle)
+
+def find_closest(cat, ra, dec):
+    min_dist = np.inf
+    min_id = None
+    for id1, ra1, dec1 in cat:
+        dist = angular_dist(ra1, dec1, ra, dec)
+        if dist < min_dist:
+              min_id = id1
+        min_dist = dist
+    
+    return min_id, min_dist
+
+
+# ## A Full Cross-Matching Program
+
+#  You now have all the tools necessary to crossmatch the BSS and SuperCOSMOS catalogues. In the next problem you'll put it all together to see how many of the bright radio sources in the BSS catalogue have a counterpart in the SuperCOSMOS catalogue. The process you should follow is:
+# 
+#    1. Select an object from the BSS catalogue;
+#    2. Go through all the objects in SuperCOSMOS and find the closest one to the BSS object;
+#    3. If the objects are close enough, record the match;
+#    4. Repeat 1-3 for all the other objects in the BSS catalogue.
+# 
+# In step 3, if the closest object isn't within a given distance then it's unlikely that the two objects are actually counterparts, and it's more likely that they just happen to be nearby.
+# 
+# The given distance you choose depends on the uncertainty of the measured object positions in each catalogue. 
+
+# ### Matchup Exercise
+
+#  Write a crossmatch function that crossmatches two catalogues within a maximum distance. It should return a list of matches and non-matches for the first catalogue against the second.
+# 
+# The list of matches contains tuples of the first and second catalogue object IDs and their distance. The list of non-matches contains the unmatched object IDs from the first catalogue only. Both lists should be ordered by the first catalogue's IDs.
+# 
+# The BSS and SuperCOSMOS catalogues will be given as input arguments, each in the format you’ve seen previously. The maximum distance is given in decimal degrees. 
+
+# In[7]:
+
+
+import numpy as np
+import numpy as np
+
+def crossmatch(cat1, cat2, max_radius):
+    matches = []
+    no_matches = []
+    for id1, ra1, dec1 in cat1:
+        closest_dist = np.inf
+        closest_id2 = None
+        for id2, ra2, dec2 in cat2:
+            dist = angular_dist(ra1, dec1, ra2, dec2)
+            if dist < closest_dist:
+                closest_id2 = id2
+                closest_dist = dist
+        
+        # Ignore match if it's outside the maximum radius
+        if closest_dist > max_radius:
+            no_matches.append(id1)
+        else:
+            matches.append((id1, closest_id2, closest_dist))
+
+    return matches, no_matches
+
+
+# ## Crossmatching with k-d trees
+
+#  You may have noticed that crossmatching takes a long time, even with significantly cut down catalogues.
+# 
+# We've seen this before: inefficient algorithms.
+# 
+# The way we've implemented our crossmatcher means that for every object in BSS, we need to calculate distance to every object in SuperCOSMOS. Even our small crossmatching task requires 160 × 500 = 80,000 distance calculations.
+# 
+# With each distance calculation taking a few microseconds, it quickly adds up to seconds or minutes.
+# 
+# Seconds may not seem like much but remember that the full SuperCOSMOS catalogue has 126 million objects, over 250,000 times larger than the truncated version we gave you to work with.
+# 
+# Then, imagine you were trying to crossmatch a catalogue other than AT20G BSS, with a size comparable to SuperCOSMOS. A crossmatching operation like that might take months or years.
+# 
+# We clearly need to be smarter about our choice of algorithm.
+# 
+# In this activity, we’ll look at modifying our previous crossmatcher to show you how easy it is to save computation time. 
+
+# ## A Small Improvement
+
+#  In the crossmatcher you developed in the previous activity, it was necessary to convert the RA and declination from degrees to radians so that the trigonometric functions could work with them.
+# 
+# If this conversion occurred in the distance calculation function, then the same coordinates would be converted many times during the crossmatching operation.
+# 
+# In the next problem, we'll ask you to modify your crossmatcher algorithm so that the conversion occurs only once, before any distance calculations. This should save only a small amount of time, but it all adds up in the end.
+# 
+# Since our focus from now on will be improving our algorithm, we'll be using randomly generated catalogues instead of SuperCOSMOS and the AT20G BSS. This lets us see if our changes are improving our algorithm's efficiency in general, instead of just finding something that works for two specific catalogues. 
+
+# ### Microoptimisation Exercise
+
+#  Write a crossmatch function for two catalogues to within a maximum radius. The catalogues are 2D NumPy arrays of RA and declination in degrees.
+# 
+# Your function should convert all the coordinates to radians before it starts crossmatching. It should return 3 values:
+# 
+#    1. A list of tuples of matched IDs and their distance in degrees;
+#    2. A list of unmatched IDs from the first catalogue;
+#    3. The time taken (in seconds) to run the crossmatcher.
+# 
+# Both catalogues are given as an N×2 NumPy array of floats. Each row contains the coordinates of a single object. The two columns are the RA and declination.
+# 
+# An object's ID is the index of its row, starting at 0. Your function should work with input catalogues with any number of objects. 
+
+# In[14]:
+
+
+# Write your crossmatch function here.
+import numpy as np
+import time
+
+def angular_dist(r1, d1, r2, d2):
+    a = np.sin(np.abs(d1 - d2)/2)**2
+    b = np.cos(d1)*np.cos(d2)*np.sin(np.abs(r1 - r2)/2)**2
+    return 2*np.arcsin(np.sqrt(a + b))
+
+def crossmatch(cat1, cat2, max_radius):
+    start = time.perf_counter()
+    max_radius = np.radians(max_radius)
+  
+    matches = []
+    no_matches = []
+
+  # Convert coordinates to radians
+    cat1 = np.radians(cat1)
+    cat2 = np.radians(cat2)
+
+    for id1, (ra1, dec1) in enumerate(cat1):
+        min_dist = np.inf
+        min_id2 = None
+        for id2, (ra2, dec2) in enumerate(cat2):
+              dist = angular_dist(ra1, dec1, ra2, dec2)
+    if dist < min_dist:
+        min_id2 = id2
+        min_dist = dist
+        
+    # Ignore match if it's outside the maximum radius
+    if min_dist > max_radius:
+        
+        no_matches.append(id1)
+    else:
+        matches.append((id1, min_id2, np.degrees(min_dist)))
+    
+    time_taken = time.perf_counter() - start
+    return matches, no_matches, time_taken
+
+# You can use this to test your function.
+# Any code inside this `if` statement will be ignored by the automarker.
+if __name__ == '__main__':
+  # The example in the question
+    cat1 = np.array([[180, 30], [45, 10], [300, -45]])
+    cat2 = np.array([[180, 32], [55, 10], [302, -44]])
+    matches, no_matches, time_taken = crossmatch(cat1, cat2, 5)
+    print('matches:', matches)
+    print('unmatched:', no_matches)
+    print('time taken:', time_taken)
+
+  # A function to create a random catalogue of size n
+def create_cat(n):
+    ras = np.random.uniform(0, 360, size=(n, 1))
+    decs = np.random.uniform(-90, 90, size=(n, 1))
+    return np.hstack((ras, decs))
+
+
+# ### Vectorisation Exercise
+
+# Copy and modify your previous angular_dist and crossmatch in radians functions to calculate the distances to all of the objects in the second catalogue using NumPy arrays.
+# 
+# The return values should behave the same way as the original function, given the same arguments, except time_taken should be noticeably smaller for large catalogues. 
+
+# In[15]:
+
+
+# Write your crossmatch function here.
+import numpy as np
+import time
+
+def angular_dist(r1, d1, r2, d2):
+    a = np.sin(np.abs(d1 - d2)/2)**2
+    b = np.cos(d1)*np.cos(d2)*np.sin(np.abs(r1 - r2)/2)**2
+    return 2*np.arcsin(np.sqrt(a + b))
+
+def crossmatch(cat1, cat2, max_radius):
+    start = time.perf_counter()
+    max_radius = np.radians(max_radius)
+  
+    matches = []
+    no_matches = []
+
+  # Convert coordinates to radians
+    cat1 = np.radians(cat1)
+    cat2 = np.radians(cat2)
+    ra2s = cat2[:,0]
+    dec2s = cat2[:,1]
+
+    for id1, (ra1, dec1) in enumerate(cat1):
+        dists = angular_dist(ra1, dec1, ra2s, dec2s)
+        min_id = np.argmin(dists)
+        min_dist = dists[min_id]
+        if min_dist > max_radius:
+              no_matches.append(id1)
+        else:
+            matches.append((id1, min_id, np.degrees(min_dist)))
+    
+    time_taken = time.perf_counter() - start
+    return matches, no_matches, time_taken
+
+# You can use this to test your function.
+# Any code inside this `if` statement will be ignored by the automarker.
+if __name__ == '__main__':
+  # The example in the question
+    ra1, dec1 = np.radians([180, 30])
+    cat2 = [[180, 32], [55, 10], [302, -44]]
+    cat2 = np.radians(cat2)
+    ra2s, dec2s = cat2[:,0], cat2[:,1]
+    dists = angular_dist(ra1, dec1, ra2s, dec2s)
+    print(np.degrees(dists))
+  
+    cat1 = np.array([[180, 30], [45, 10], [300, -45]])
+    cat2 = np.array([[180, 32], [55, 10], [302, -44]])
+    matches, no_matches, time_taken = crossmatch(cat1, cat2, 5)
+    print('matches:', matches)
+    print('unmatched:', no_matches)
+    print('time taken:', time_taken)
+
+  # A function to create a random catalogue of size n
+def create_cat(n):
+    ras = np.random.uniform(0, 360, size=(n, 1))
+    decs = np.random.uniform(-90, 90, size=(n, 1))
+    return np.hstack((ras, decs))
+
+  # Test your function on random inputs
+    cat1 = create_cat(10)
+    cat2 = create_cat(20)
+    matches, no_matches, time_taken = crossmatch(cat1, cat2, 5)
+    print('matches:', matches)
+    print('unmatched:', no_matches)
+    print('time taken:', time_taken)
+
+
+#  Another optimisation we can make is to ignore objects in the second catalogue with a declination far from the first catalogue object currently being matched. The easiest way of doing this is:
+# 
+# 1. Loop through the second catalogue objects in order of declination, rather than ID;
+# 2. Stop when the declination of the second catalogue object exceeds the target declination by the maximum radius.
+# 
+# So, for example, say we have a first catalogue object (the target) with a declination of δ and we’ve set our maximum match radius to r. The new algorithm will only loop over second catalogue objects with declinations between -90 (the start) and δ+r degrees before it breaks out of the loop.
+# 
+# If we have evenly distributed objects, this lets crossmatch avoid distance calculations to approximately half the second catalogue objects (on average).
+# 
+# We'll show you how to cut down the -90 starting declination soon! 
+
+# ### Break out Exercise
+
+#  Copy your crossmatch solution from Microoptimisation and modify it so that it sorts catalogue 2 by declination and breaks out of the inner loop early.
+# 
+# Your crossmatch should break out of the loop over the second catalogue when the declination reaches dec1 + max_radius.
+# 
+# The return values should behave the same way as the original function, given the same arguments, except time_taken should be noticeably smaller for large catalogues.
+# 
+# We will test your function on random input arrays. We've included the function create_cat in the starting file to generate random arrays so you can test your function yourself. 
+
+# In[8]:
+
+
+# Write your crossmatch function here.
+import numpy as np
+import time
+
+def angular_dist(r1, d1, r2, d2):
+    a = np.sin(np.abs(d1 - d2)/2)**2
+    b = np.cos(d1)*np.cos(d2)*np.sin(np.abs(r1 - r2)/2)**2
+    return 2*np.arcsin(np.sqrt(a + b))
+
+def crossmatch(cat1, cat2, max_radius):
+    start = time.perf_counter()
+    max_radius = np.radians(max_radius)
+  
+    matches = []
+    no_matches = []
+
+  # Convert coordinates to radians
+    cat1 = np.radians(cat1)
+    cat2 = np.radians(cat2)
+    order = np.argsort(cat2[:,1])
+    cat2_ordered = cat2[order]
+  
+    for id1, (ra1, dec1) in enumerate(cat1):
+        min_dist = np.inf
+        min_id2 = None
+        max_dec = dec1 + max_radius
+        for id2, (ra2, dec2) in enumerate(cat2_ordered):
+            if dec2 > max_dec:
+                break
+        
+        dist = angular_dist(ra1, dec1, ra2, dec2)
+        if dist < min_dist:
+            min_id2 = order[id2]
+            min_dist = dist
+        
+    # Ignore match if it's outside the maximum radius
+    if min_dist > max_radius:
+        no_matches.append(id1)
+    else:
+        matches.append((id1, min_id2, np.degrees(min_dist)))
+    
+    time_taken = time.perf_counter() - start
+    return matches, no_matches, time_taken
+
+# You can use this to test your function.
+# Any code inside this `if` statement will be ignored by the automarker.
+if __name__ == '__main__':
+  # The example in the question
+    cat1 = np.array([[180, 30], [45, 10], [300, -45]])
+    cat2 = np.array([[180, 32], [55, 10], [302, -44]])
+    matches, no_matches, time_taken = crossmatch(cat1, cat2, 5)
+    print('matches:', matches)
+    print('unmatched:', no_matches)
+    print('time taken:', time_taken)
+
+  # A function to create a random catalogue of size n
+    def create_cat(n):
+        ras = np.random.uniform(0, 360, size=(n, 1))
+        decs = np.random.uniform(-90, 90, size=(n, 1))
+        return np.hstack((ras, decs))
+
+  # Test your function on random inputs
+    np.random.seed(0)
+    cat1 = create_cat(10)
+    cat2 = create_cat(20)
+    matches, no_matches, time_taken = crossmatch(cat1, cat2, 5)
+    print('matches:', matches)
+    print('unmatched:', no_matches)
+    print('time taken:', time_taken)
+
+
+# ## Boxing in the Search
+
+#  We can improve on the previous optimisation further by not only stopping the search once it gets past declination of the object to be matched, but starting the search as close as possible to the object. To summarise, the modification is:
+# 
+# - Sort the second catalogue objects by order of declination;
+# - Start the search loop at the first second catalogue object with declination greater than δ−r;
+# - Finish the search loop at the last second catalogue object with declination less than δ+r.
+# 
+# Boxing in the search in this way saves on calculating the distances for almost the entire second catalogue.
+# 
+# We just need to find a fast way to find the second catalogue objects nearest to the boundaries of [δ−r,δ+r] so we know where to start and finish our search.
+# 
+# The easiest way to do this conceptually is to loop through the sorted catalogue, checking every declination until we find the objects we're looking for. But there is a more efficient way. 
+
+# ## Binary Search
+
+# If a list is sorted, it can be much faster to find the index of some element using a binary search, rather than doing comparisons on every element in the list.
+# 
+# A binary search splits the list in half repeatedly, continuing the search in the half that may contain the target element. 
+
+# ### Boxing Match
+
+# Copy crossmatch from Break out and modify it to only loop through objects in the second catalogue with declinations between dec1 - max_radius and dec1 + max_radius using binary search.
+# 
+# Your crossmatch should use np.searchsorted to find the starting point (just before dec1 - max_radius) and then break out of the loop when the declination reaches dec1 + max_radius.
+# 
+# The return values should behave the same way as the original function, given the same arguments, except time_taken should be noticeably smaller for large catalogues
+
+# In[9]:
+
+
+import numpy as np
+from time import time
+
+def angular_dist_rad(r1, d1, r2, d2):
+    deltar = np.abs(r1 - r2)
+    deltad = np.abs(d1 - d2)
+    angle = 2*np.arcsin(np.sqrt(np.sin(deltad/2)**2 
+                        + np.cos(d1)*np.cos(d2)*np.sin(deltar/2)**2))
+    return angle
+
+def crossmatch_box(coords1, coords2):
+    start_time = time()
+    deg2rad = np.pi/180
+    rad2deg = 180/np.pi
+    max_radius = 5*deg2rad
+    matches = []
+    no_matches = []
+    
+    # Convert coordinates to radians
+    coords1 = coords1*deg2rad
+    coords2 = coords2*deg2rad
+    
+    # Find ascending declination order of second catalogue
+    asc_dec = np.argsort(coords2[:, 1])
+    coords2_sorted = coords2[asc_dec]
+    dec2_sorted = coords2_sorted[:, 1]
+    
+    for id1, (ra1, dec1) in enumerate(coords1):
+        closest_dist = np.inf
+        closest_id2 = None
+        
+        # Declination search box
+        min_dec = dec1 - max_radius
+        max_dec = dec1 + max_radius
+        
+        # Start and end indices of the search
+        start = dec2_sorted.searchsorted(min_dec, side='left')
+        end = dec2_sorted.searchsorted(max_dec, side='right')
+        
+        for s_id2, (ra2, dec2) in enumerate(coords2_sorted[start:end+1], start):
+            dist = angular_dist_rad(ra1, dec1, ra2, dec2)
+            if dist < closest_dist:
+                closest_sorted_id2 = s_id2
+                closest_dist = dist
+        
+        # Ignore match if it's outside the maximum radius
+        if closest_dist > max_radius:
+            no_matches.append(id1)
+        else:
+            closest_id2 = asc_dec[closest_sorted_id2]
+            matches.append([id1, closest_id2, closest_dist*rad2deg])
+    
+    time_taken = time() - start_time
+    return matches, no_matches, time_taken
+
+
+# ## k-d Trees
+
+# Crossmatching is a very common task in astrophysics, so it's natural that it's had optimised implementations written of it already. A popular implementation in Python is found in the Astropy module and it uses objects called k-d trees to perform crossmatching incredibly quickly.
+
+# Once you've made a k-d tree out of a catalogue, finding a match to an object then works like this:
+# 
+# 1. Calculate the distance from the object to highest level node (the root node), then go to the child node closest (in right ascension) to the object
+# 2. Calculate the distance from the object to this child, then go to the child node closest (in declination) to the object
+# 3. Calculate the distance from the object to this child, then go to the child node closest (in right ascension) to the object
+# 4. Repeat 2-3 until you reach a child node with no further children (a leaf node)
+# 5. Find the shortest distance of all distances calculated, this corresponds to the closest object
+# 
+# Since each node branches into two children, a catalogue of N objects will have, on average, log2(N) nodes from the root to any leaf. So while it seems like a lot of effort to create a k-d tree, doing so lets you, for example, search the entire SuperCOSMOS catalogue of 250 million objects using only 28 distance calculations.
+
+# ### Space Trees Exercise
+
+# Copy your crossmatch solution from Microoptimisation and (substantially!) modify it to use Astropy to perform the matching.
+# 
+# The return values should behave the same way as the original function, given the same arguments, except time_taken should be noticeably smaller for large catalogues. 
+
+# In[16]:
+
+
+from astropy.coordinates import SkyCoord
+from astropy import units as u
+from time import time
+
+def crossmatch_tree(coords1, coords2):
+    start_time = time()
+    max_radius = 5
+    matches = []
+    no_matches = []
+    
+    coords1_sc = SkyCoord(coords1*u.degree, frame = 'icrs')
+    coords2_sc = SkyCoord(coords2*u.degree, frame = 'icrs')
+    
+    
+    closest_ids, closest_dists, _ = coords1_sc.match_to_catalog_sky(coords2_sc)
+    
+    for id1, (closest_id2, dist) in enumerate(zip(closest_ids, closest_dists)):
+        closest_dist = dist.value
+        
+        if closest_dist > max_radius:
+            no_matches.append(id1)
+        else:
+            matches.append([id1, closest_id2, closest_dist])
+    time_taken = time()-start_time
+    return matches, no_matches, time_taken
+
+
+# In[ ]:
+
+
+
+
